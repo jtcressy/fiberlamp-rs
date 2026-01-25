@@ -100,7 +100,8 @@ impl App {
         let mut vertices = Vec::with_capacity(lamp.fibers.len() * (NODES - 1) * 6);
 
         for fiber in &lamp.fibers {
-            for i in 1..NODES {
+            // Skip first segment so fibers start spread apart (not from single point)
+            for i in 2..NODES {
                 let parent = &fiber.nodes[i - 1];
                 let node = &fiber.nodes[i];
 
@@ -122,17 +123,17 @@ impl App {
                 );
 
                 // Line width: thicker at base, thinner at tips
-                let base_width = 4.0 / width as f32; // 4 pixels at base
-                let tip_width = 1.0 / width as f32;  // 1 pixel at tip
+                let base_width = 6.0 / width as f32; // 6 pixels at base
+                let tip_width = 2.0 / width as f32;  // 2 pixels at tip
                 let t0 = (i - 1) as f32 / (NODES - 1) as f32;
                 let t1 = i as f32 / (NODES - 1) as f32;
                 let width0 = base_width * (1.0 - t0) + tip_width * t0;
                 let width1 = base_width * (1.0 - t1) + tip_width * t1;
 
                 // Color based on segment type
-                let color = if i < NODES - 3 {
-                    // Body: color based on z-depth
-                    body_color(node.z)
+                let color = if i < NODES - 2 {
+                    // Body: color based on z-depth and segment position
+                    body_color(node.z, t1)
                 } else {
                     // Tip segments: color from rotating palette
                     let tip = fiber.tip();

@@ -110,18 +110,30 @@ pub fn generate_palette(ncolors: usize) -> Vec<[f32; 3]> {
         .collect()
 }
 
-/// Body color based on z-depth (3 levels from original)
-pub fn body_color(z: f32) -> [f32; 4] {
+/// Body color based on z-depth and segment position
+/// seg_t: 0.0 = base, 1.0 = tip - used to dim base where fibers overlap
+pub fn body_color(z: f32, seg_t: f32) -> [f32; 4] {
     // z ranges from about -1 to 1
-    // Dim (back), medium (middle), bright (front)
-    let (r, g, b) = if z < -0.3 {
-        (0.25, 0.25, 0.125) // #404020 dim (back)
-    } else if z < 0.3 {
-        (0.5, 0.5, 0.44) // #808070 medium (middle)
-    } else {
-        (0.875, 0.875, 0.75) // #E0E0C0 bright (front)
-    };
-    [r, g, b, 0.6] // Semi-transparent for glow accumulation
+    // Map z to normalized depth: 0 = back, 1 = front
+    let depth_t = ((z + 1.0) / 2.0).clamp(0.0, 1.0);
+
+    // Inverse-square falloff for realistic light attenuation
+    // Map depth to distance: front (depth_t=1) -> d=1, back (depth_t=0) -> d=8
+    // front: 1/1² = 1.0 (100%), back: 1/8² = 0.016 (1.6%)
+    let distance = 1.0 + (1.0 - depth_t) * 7.0;
+    let inv_sq = 1.0 / (distance * distance);
+
+    // Interpolate from very dark olive (back) to bright white (front)
+    // Very dark olive base: ~#1a1a0d = (0.1, 0.1, 0.05)
+    // Bright white/cream at front: (1.0, 1.0, 0.9)
+    let r = 0.1 + inv_sq * 0.9;
+    let g = 0.1 + inv_sq * 0.9;
+    let b = 0.05 + inv_sq * 0.85;
+
+    // Dim base segments heavily to compensate for additive overlap
+    let seg_brightness = 0.1 + seg_t * seg_t * 0.9;
+
+    [r * seg_brightness, g * seg_brightness, b * seg_brightness, 0.4]
 }
 
 /// Tip color from rotating palette

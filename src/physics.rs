@@ -190,9 +190,9 @@ impl Fiber {
     }
 }
 
-/// Geometric rotation speed: ~10 degrees/minute at 60fps
-/// 10° / 60s / 60fps ≈ 0.00029 rad/frame
-const DTHETA: f32 = 0.0003;
+/// Geometric rotation speed: ~20 degrees/minute at 60fps
+/// 20° / 60s / 60fps ≈ 0.00058 rad/frame
+const DTHETA: f32 = 0.0006;
 
 /// The complete fiber lamp simulation
 pub struct FiberLamp {
