@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use clap::Parser;
 use glam::Vec2;
@@ -17,6 +18,11 @@ mod vertex;
 use physics::{FiberLamp, NODES};
 use renderer::Renderer;
 use vertex::{body_color, generate_palette, tip_color, triangulate_segment, FiberVertex};
+
+/// Fixed physics timestep (60Hz)
+const PHYSICS_DT: f32 = 1.0 / 60.0;
+/// Maximum physics steps per frame to prevent spiral of death
+const MAX_PHYSICS_STEPS: u32 = 4;
 
 /// Modern fiber optic lamp screensaver - Rust/wgpu reimplementation of xscreensaver fiberlamp
 #[derive(Parser, Debug, Clone)]
@@ -37,6 +43,10 @@ pub struct Args {
     /// Run in windowed mode instead of fullscreen
     #[arg(short, long)]
     pub windowed: bool,
+
+    /// MSAA sample count for anti-aliasing (1=off, 2, 4, or 8)
+    #[arg(short, long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=8))]
+    pub msaa: u32,
 }
 
 struct App {
@@ -47,6 +57,8 @@ struct App {
     rng: ThreadRng,
     palette: Vec<[f32; 3]>,
     frame_count: u64,
+    last_frame: Option<Instant>,
+    physics_accumulator: f32,
 }
 
 impl App {
@@ -61,6 +73,8 @@ impl App {
             rng: rand::thread_rng(),
             palette,
             frame_count: 0,
+            last_frame: None,
+            physics_accumulator: 0.0,
         }
     }
 
@@ -79,6 +93,10 @@ impl App {
         // Scale factor to fit fibers on screen
         let scale = 1.5; // Scale up to fill screen nicely
 
+        // Precompute rotation for the entire lamp
+        let cos_t = lamp.theta.cos();
+        let sin_t = lamp.theta.sin();
+
         let mut vertices = Vec::with_capacity(lamp.fibers.len() * (NODES - 1) * 6);
 
         for fiber in &lamp.fibers {
@@ -86,16 +104,20 @@ impl App {
                 let parent = &fiber.nodes[i - 1];
                 let node = &fiber.nodes[i];
 
+                // Apply geometric rotation around vertical axis (rotate x/z plane)
+                let parent_rx = parent.x * cos_t - parent.z * sin_t;
+                let node_rx = node.x * cos_t - node.z * sin_t;
+
                 // Convert 3D position to 2D screen space
                 // Base at bottom, fibers spray upward (like original xscreensaver)
                 // Physics: y=0 at base, y<0 toward tips (upward)
                 // Screen: y=-1 bottom, y=+1 top
                 let p0 = Vec2::new(
-                    parent.x * scale / aspect,
+                    parent_rx * scale / aspect,
                     -parent.y * scale - 0.7,
                 );
                 let p1 = Vec2::new(
-                    node.x * scale / aspect,
+                    node_rx * scale / aspect,
                     -node.y * scale - 0.7,
                 );
 
@@ -145,7 +167,7 @@ impl ApplicationHandler for App {
         );
 
         // Initialize wgpu renderer
-        let renderer = pollster::block_on(Renderer::new(window.clone()));
+        let renderer = pollster::block_on(Renderer::new(window.clone(), self.args.msaa));
 
         // Initialize fiber lamp simulation
         let fiber_lamp = FiberLamp::new(self.args.count as usize, &mut self.rng);
@@ -195,10 +217,23 @@ impl ApplicationHandler for App {
             WindowEvent::RedrawRequested => {
                 self.frame_count += 1;
 
-                // Step physics simulation
-                if let Some(lamp) = &mut self.fiber_lamp {
-                    lamp.step(&mut self.rng);
+                // Calculate delta time for fixed-timestep physics
+                let now = Instant::now();
+                if let Some(last) = self.last_frame {
+                    let delta = (now - last).as_secs_f32();
+                    self.physics_accumulator += delta;
+
+                    // Step physics at fixed 60Hz, capped to prevent spiral of death
+                    if let Some(lamp) = &mut self.fiber_lamp {
+                        let mut steps = 0;
+                        while self.physics_accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS {
+                            lamp.step(&mut self.rng);
+                            self.physics_accumulator -= PHYSICS_DT;
+                            steps += 1;
+                        }
+                    }
                 }
+                self.last_frame = Some(now);
 
                 // Generate vertices from fiber positions
                 let vertices = self.generate_fiber_vertices();

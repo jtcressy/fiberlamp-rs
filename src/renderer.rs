@@ -16,15 +16,28 @@ pub struct Renderer {
     render_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     num_vertices: u32,
+    msaa_sample_count: u32,
+    msaa_texture: Option<wgpu::Texture>,
+    msaa_view: Option<wgpu::TextureView>,
 }
 
 impl Renderer {
-    pub async fn new(window: Arc<Window>) -> Self {
+    pub async fn new(window: Arc<Window>, msaa_sample_count: u32) -> Self {
+        // Validate and normalize MSAA sample count to power of 2
+        let msaa_sample_count = match msaa_sample_count {
+            0 | 1 => 1,
+            2 => 2,
+            3 | 4 => 4,
+            _ => 8,
+        };
+
         let size = window.inner_size();
 
-        // Create wgpu instance with Vulkan backend preferred for Wayland
+        // Create wgpu instance with platform-native backend (Vulkan on Linux, Metal on macOS)
+        // Disable debug utils to suppress Vulkan loader warnings about missing ICDs
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            backends: wgpu::Backends::PRIMARY,
+            flags: wgpu::InstanceFlags::empty(),
             ..Default::default()
         });
 
@@ -144,7 +157,11 @@ impl Renderer {
                 conservative: false,
             },
             depth_stencil: None, // No depth testing
-            multisample: wgpu::MultisampleState::default(),
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
             multiview: None,
             cache: None,
         });
@@ -156,6 +173,17 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
         });
 
+        // Create MSAA texture if sample count > 1
+        let (msaa_texture, msaa_view) = if msaa_sample_count > 1 {
+            let texture = Self::create_msaa_texture(&device, &config, msaa_sample_count);
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            log::info!("MSAA enabled with {}x samples", msaa_sample_count);
+            (Some(texture), Some(view))
+        } else {
+            log::info!("MSAA disabled");
+            (None, None)
+        };
+
         Self {
             surface,
             device,
@@ -165,7 +193,31 @@ impl Renderer {
             render_pipeline,
             vertex_buffer,
             num_vertices: 0,
+            msaa_sample_count,
+            msaa_texture,
+            msaa_view,
         }
+    }
+
+    fn create_msaa_texture(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        sample_count: u32,
+    ) -> wgpu::Texture {
+        device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("MSAA Texture"),
+            size: wgpu::Extent3d {
+                width: config.width,
+                height: config.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -174,6 +226,16 @@ impl Renderer {
             self.config.width = width;
             self.config.height = height;
             self.surface.configure(&self.device, &self.config);
+
+            // Recreate MSAA texture if enabled
+            if self.msaa_sample_count > 1 {
+                let texture =
+                    Self::create_msaa_texture(&self.device, &self.config, self.msaa_sample_count);
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                self.msaa_texture = Some(texture);
+                self.msaa_view = Some(view);
+            }
+
             log::debug!("Resized to {}x{}", width, height);
         }
     }
@@ -189,7 +251,7 @@ impl Renderer {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
-        let view = output
+        let surface_view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -200,11 +262,18 @@ impl Renderer {
             });
 
         {
+            // With MSAA: render to msaa_view, resolve to surface_view
+            // Without MSAA: render directly to surface_view
+            let (view, resolve_target) = match &self.msaa_view {
+                Some(msaa_view) => (msaa_view, Some(&surface_view)),
+                None => (&surface_view, None),
+            };
+
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Fiber Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
+                    view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,

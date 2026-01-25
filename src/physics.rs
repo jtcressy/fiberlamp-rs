@@ -190,6 +190,10 @@ impl Fiber {
     }
 }
 
+/// Geometric rotation speed: ~10 degrees/minute at 60fps
+/// 10° / 60s / 60fps ≈ 0.00029 rad/frame
+const DTHETA: f32 = 0.0003;
+
 /// The complete fiber lamp simulation
 pub struct FiberLamp {
     pub fibers: Vec<Fiber>,
@@ -198,6 +202,8 @@ pub struct FiberLamp {
     pub dpsi: f32,
     pub bump_counter: u32,
     pub cycles: u32,
+    /// Current geometric rotation angle (radians)
+    pub theta: f32,
 }
 
 impl FiberLamp {
@@ -211,6 +217,7 @@ impl FiberLamp {
             dpsi: 0.01,
             bump_counter: 0,
             cycles: 10000,
+            theta: 0.0,
         }
     }
 
@@ -226,6 +233,12 @@ impl FiberLamp {
         self.psi += self.dpsi;
         if self.psi > 2.0 * PI {
             self.psi -= 2.0 * PI;
+        }
+
+        // Geometric rotation (~10 degrees/minute)
+        self.theta += DTHETA;
+        if self.theta > 2.0 * PI {
+            self.theta -= 2.0 * PI;
         }
 
         // Update fibers
