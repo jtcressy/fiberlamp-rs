@@ -36,11 +36,6 @@ const COLLISION_RADIUS: f32 = 0.25;
 /// Note: This scales mouse velocity, so needs to be larger
 const COLLISION_STRENGTH: f32 = 200.0;
 
-/// Window movement inertia strength multiplier
-/// Higher = fibers sway more when window is dragged
-/// NOTE: This only works on X11. On Wayland, WindowEvent::Moved doesn't fire.
-/// Set to 0.0 to disable window inertia entirely
-const INERTIA_STRENGTH: f32 = 5.0;
 
 /// Number of segments for the debug collision circle
 const DEBUG_CIRCLE_SEGMENTS: usize = 32;
@@ -343,10 +338,6 @@ impl ApplicationHandler for App {
                 }
             }
 
-            WindowEvent::Moved(position) => {
-                // Track window position for inertia effect
-                self.input_state.update_window_pos(position.x, position.y);
-            }
 
             WindowEvent::CursorMoved { position, .. } => {
                 // Convert pixel coordinates to clip space [-1, 1]
@@ -377,21 +368,9 @@ impl ApplicationHandler for App {
                     self.collision_impulses.fill(0.0);
                 }
 
-                // Build external forces from input state
-                let (vx, vy) = self.input_state.window_velocity();
-
-                // Log forces being applied (periodically)
-                if self.frame_count % 120 == 0 && (vx.abs() > 0.01 || vy.abs() > 0.01) {
-                    log::info!("Window velocity: ({:.3}, {:.3}), applied impulse: ({:.3}, {:.3})",
-                        vx, vy, vx * INERTIA_STRENGTH, vy * INERTIA_STRENGTH);
-                }
-
+                // Build external forces for physics
                 let forces = ExternalForces::new()
-                    .with_window_impulse(vx * INERTIA_STRENGTH, vy * INERTIA_STRENGTH)
                     .with_collision_impulses(&self.collision_impulses);
-
-                // Decay window velocity for next frame
-                self.input_state.decay_velocity();
 
                 // Calculate delta time for fixed-timestep physics
                 let now = Instant::now();

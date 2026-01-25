@@ -7,8 +7,6 @@ pub const NODES: usize = 20;
 /// External forces applied to the fiber lamp from user interaction
 #[derive(Debug, Clone, Default)]
 pub struct ExternalForces<'a> {
-    /// Window movement impulse (x, y) - applied to base nodes
-    pub window_impulse: (f32, f32),
     /// Per-fiber collision impulses from mouse sphere (indexed by fiber)
     /// If None, no collision system active
     pub collision_impulses: Option<&'a [f32]>,
@@ -17,11 +15,6 @@ pub struct ExternalForces<'a> {
 impl<'a> ExternalForces<'a> {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub fn with_window_impulse(mut self, x: f32, y: f32) -> Self {
-        self.window_impulse = (x, y);
-        self
     }
 
     pub fn with_collision_impulses(mut self, impulses: &'a [f32]) -> Self {
@@ -122,14 +115,11 @@ impl Fiber {
     }
 
     /// Simulate one step - matches original draw_fiberlamp physics loop exactly
-    /// cx: horizontal impulse (eta direction)
-    /// cy: vertical impulse (phi direction)
+    /// cx: horizontal impulse (eta direction) from periodic bumps
     /// collision: impulse from mouse collision (pushes fiber away)
-    pub fn step(&mut self, cx: f32, cy: f32, collision: f32) {
+    pub fn step(&mut self, cx: f32, collision: f32) {
         // Apply bump to base node eta (horizontal sway)
         self.nodes[0].eta += cx * 0.05;
-        // Apply vertical component to base node phi
-        self.nodes[0].phi += cy * 0.05;
 
         // Apply collision impulse directly to base node angle (eta)
         // This causes the entire fiber to sway in the direction of mouse movement
@@ -293,12 +283,6 @@ impl FiberLamp {
             self.theta -= 2.0 * PI;
         }
 
-        // Combine internal bump with external window movement impulse
-        // Window impulse: x affects eta (horizontal sway), y affects phi (forward/back)
-        // Window velocity is in pixels/frame, scale to physics units
-        let combined_cx = self.cx + forces.window_impulse.0 * 0.002;
-        let window_cy = forces.window_impulse.1 * 0.001;
-
         // Update fibers
         for (i, fiber) in self.fibers.iter_mut().enumerate() {
             // Get per-fiber collision impulse if available
@@ -307,7 +291,7 @@ impl FiberLamp {
                 .and_then(|impulses| impulses.get(i).copied())
                 .unwrap_or(0.0);
 
-            fiber.step(combined_cx, window_cy, collision);
+            fiber.step(self.cx, collision);
         }
 
         // Decay bump
@@ -364,8 +348,9 @@ mod tests {
         let mut rng = rand::thread_rng();
         let mut lamp = FiberLamp::new(5, &mut rng);
 
-        // Test with window impulse
-        let forces = ExternalForces::new().with_window_impulse(10.0, 5.0);
+        // Test with collision impulses
+        let impulses = vec![0.1, -0.1, 0.0, 0.05, -0.05];
+        let forces = ExternalForces::new().with_collision_impulses(&impulses);
         lamp.step(&mut rng, &forces);
 
         // Verify simulation remains stable with external forces
