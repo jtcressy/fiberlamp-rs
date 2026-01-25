@@ -11,13 +11,39 @@ use winit::{
     window::{Fullscreen, Window, WindowId},
 };
 
+mod input;
 mod physics;
 mod renderer;
 mod vertex;
 
-use physics::{FiberLamp, NODES};
+use input::InputState;
+use physics::{ExternalForces, FiberLamp, NODES};
 use renderer::Renderer;
 use vertex::{body_color, generate_palette, tip_color, triangulate_segment, FiberVertex};
+
+// ============================================================================
+// INTERACTIVITY TUNING CONSTANTS
+// Adjust these to change how fibers respond to window movement and mouse
+// ============================================================================
+
+/// Mouse collision sphere radius in clip space [-1, 1]
+/// Larger = easier to hit fibers, smaller = more precise
+/// Set to 0.0 to disable mouse collision entirely
+const COLLISION_RADIUS: f32 = 0.25;
+
+/// Collision impulse strength multiplier
+/// Higher = fibers react more strongly to mouse collision
+/// Note: This scales mouse velocity, so needs to be larger
+const COLLISION_STRENGTH: f32 = 200.0;
+
+/// Window movement inertia strength multiplier
+/// Higher = fibers sway more when window is dragged
+/// NOTE: This only works on X11. On Wayland, WindowEvent::Moved doesn't fire.
+/// Set to 0.0 to disable window inertia entirely
+const INERTIA_STRENGTH: f32 = 5.0;
+
+/// Number of segments for the debug collision circle
+const DEBUG_CIRCLE_SEGMENTS: usize = 32;
 
 /// Fixed physics timestep (60Hz)
 const PHYSICS_DT: f32 = 1.0 / 60.0;
@@ -47,6 +73,10 @@ pub struct Args {
     /// MSAA sample count for anti-aliasing (1=off, 2, 4, or 8)
     #[arg(short, long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=8))]
     pub msaa: u32,
+
+    /// Enable debug visualizations (collision sphere, etc.)
+    #[arg(long)]
+    pub debug: bool,
 }
 
 struct App {
@@ -59,11 +89,15 @@ struct App {
     frame_count: u64,
     last_frame: Option<Instant>,
     physics_accumulator: f32,
+    input_state: InputState,
+    /// Pre-allocated buffer for collision impulses (one per fiber)
+    collision_impulses: Vec<f32>,
 }
 
 impl App {
     fn new(args: Args) -> Self {
         let palette = generate_palette(args.ncolors as usize);
+        let fiber_count = args.count as usize;
 
         Self {
             args,
@@ -75,6 +109,8 @@ impl App {
             frame_count: 0,
             last_frame: None,
             physics_accumulator: 0.0,
+            input_state: InputState::new(),
+            collision_impulses: vec![0.0; fiber_count],
         }
     }
 
@@ -147,6 +183,98 @@ impl App {
 
         vertices
     }
+
+    /// Calculate collision impulses for all fibers based on mouse position and velocity
+    /// Updates self.collision_impulses in place
+    fn calculate_collision_impulses(&mut self, mouse_pos: (f32, f32), mouse_velocity: (f32, f32)) {
+        let Some(lamp) = &self.fiber_lamp else {
+            return;
+        };
+        let Some(renderer) = &self.renderer else {
+            return;
+        };
+
+        let (width, height) = renderer.size();
+        let aspect = width as f32 / height as f32;
+        let scale = 1.5;
+
+        let cos_t = lamp.theta.cos();
+        let sin_t = lamp.theta.sin();
+
+        // Mouse speed determines impulse strength
+        let mouse_speed = (mouse_velocity.0 * mouse_velocity.0 + mouse_velocity.1 * mouse_velocity.1).sqrt();
+
+        for (i, fiber) in lamp.fibers.iter().enumerate() {
+            let tip = fiber.tip();
+
+            // Apply geometric rotation (same as in generate_fiber_vertices)
+            let tip_rx = tip.x * cos_t - tip.z * sin_t;
+            // Also compute rotated z for depth check
+            let tip_rz = tip.x * sin_t + tip.z * cos_t;
+
+            // Convert to clip space
+            let tip_screen = (
+                tip_rx * scale / aspect,
+                -tip.y * scale - 0.7,
+            );
+
+            // Check if tip is within collision radius
+            let dx = tip_screen.0 - mouse_pos.0;
+            let dy = tip_screen.1 - mouse_pos.1;
+            let dist_sq = dx * dx + dy * dy;
+            let radius_sq = COLLISION_RADIUS * COLLISION_RADIUS;
+
+            // Only apply impulse if:
+            // 1. Tip is within collision radius
+            // 2. Mouse is actually moving (velocity-based)
+            // 3. Fiber is front-facing
+            let impulse = if dist_sq < radius_sq && mouse_speed > 0.001 && tip_rz > -0.1 {
+                // Impulse direction: PUSH fiber in direction of mouse movement
+                // Scale by how close to center (stronger near center)
+                let dist = dist_sq.sqrt();
+                let penetration = 1.0 - (dist / COLLISION_RADIUS);
+
+                // Negate to push (not pull) fibers in mouse direction
+                -mouse_velocity.0 * penetration * COLLISION_STRENGTH
+            } else {
+                0.0
+            };
+
+            if i < self.collision_impulses.len() {
+                self.collision_impulses[i] = impulse;
+            }
+        }
+    }
+
+    /// Generate debug visualization vertices for the collision sphere
+    fn generate_debug_collision_sphere(&self, mouse_pos: (f32, f32)) -> Vec<FiberVertex> {
+        use std::f32::consts::PI;
+
+        let mut vertices = Vec::with_capacity(DEBUG_CIRCLE_SEGMENTS * 6);
+
+        // Draw circle as line segments (rendered as thin quads)
+        let line_width = 0.005; // Thin line
+        let color = [1.0, 0.0, 0.0, 0.8]; // Red with some transparency
+
+        for i in 0..DEBUG_CIRCLE_SEGMENTS {
+            let angle0 = (i as f32 / DEBUG_CIRCLE_SEGMENTS as f32) * 2.0 * PI;
+            let angle1 = ((i + 1) as f32 / DEBUG_CIRCLE_SEGMENTS as f32) * 2.0 * PI;
+
+            let p0 = Vec2::new(
+                mouse_pos.0 + COLLISION_RADIUS * angle0.cos(),
+                mouse_pos.1 + COLLISION_RADIUS * angle0.sin(),
+            );
+            let p1 = Vec2::new(
+                mouse_pos.0 + COLLISION_RADIUS * angle1.cos(),
+                mouse_pos.1 + COLLISION_RADIUS * angle1.sin(),
+            );
+
+            let segment = triangulate_segment(p0, p1, line_width, line_width, color);
+            vertices.extend_from_slice(&segment);
+        }
+
+        vertices
+    }
 }
 
 impl ApplicationHandler for App {
@@ -215,8 +343,55 @@ impl ApplicationHandler for App {
                 }
             }
 
+            WindowEvent::Moved(position) => {
+                // Track window position for inertia effect
+                self.input_state.update_window_pos(position.x, position.y);
+            }
+
+            WindowEvent::CursorMoved { position, .. } => {
+                // Convert pixel coordinates to clip space [-1, 1]
+                if let Some(window) = &self.window {
+                    let size = window.inner_size();
+                    let clip_x = (position.x as f32 / size.width as f32) * 2.0 - 1.0;
+                    let clip_y = -((position.y as f32 / size.height as f32) * 2.0 - 1.0); // Flip Y
+                    self.input_state.update_mouse_pos(clip_x, clip_y);
+                }
+            }
+
+            WindowEvent::CursorLeft { .. } => {
+                self.input_state.set_mouse_inactive();
+            }
+
             WindowEvent::RedrawRequested => {
                 self.frame_count += 1;
+
+                // Calculate collision impulses if mouse is active
+                if let Some(mouse_pos) = self.input_state.mouse_pos() {
+                    let mouse_velocity = self.input_state.mouse_velocity();
+                    self.calculate_collision_impulses(mouse_pos, mouse_velocity);
+
+                    // Decay mouse velocity for next frame
+                    self.input_state.decay_mouse_velocity();
+                } else {
+                    // Clear collision impulses when mouse is inactive
+                    self.collision_impulses.fill(0.0);
+                }
+
+                // Build external forces from input state
+                let (vx, vy) = self.input_state.window_velocity();
+
+                // Log forces being applied (periodically)
+                if self.frame_count % 120 == 0 && (vx.abs() > 0.01 || vy.abs() > 0.01) {
+                    log::info!("Window velocity: ({:.3}, {:.3}), applied impulse: ({:.3}, {:.3})",
+                        vx, vy, vx * INERTIA_STRENGTH, vy * INERTIA_STRENGTH);
+                }
+
+                let forces = ExternalForces::new()
+                    .with_window_impulse(vx * INERTIA_STRENGTH, vy * INERTIA_STRENGTH)
+                    .with_collision_impulses(&self.collision_impulses);
+
+                // Decay window velocity for next frame
+                self.input_state.decay_velocity();
 
                 // Calculate delta time for fixed-timestep physics
                 let now = Instant::now();
@@ -228,7 +403,7 @@ impl ApplicationHandler for App {
                     if let Some(lamp) = &mut self.fiber_lamp {
                         let mut steps = 0;
                         while self.physics_accumulator >= PHYSICS_DT && steps < MAX_PHYSICS_STEPS {
-                            lamp.step(&mut self.rng);
+                            lamp.step(&mut self.rng, &forces);
                             self.physics_accumulator -= PHYSICS_DT;
                             steps += 1;
                         }
@@ -237,7 +412,15 @@ impl ApplicationHandler for App {
                 self.last_frame = Some(now);
 
                 // Generate vertices from fiber positions
-                let vertices = self.generate_fiber_vertices();
+                let mut vertices = self.generate_fiber_vertices();
+
+                // Add debug collision sphere visualization if enabled via --debug flag
+                if self.args.debug {
+                    if let Some(mouse_pos) = self.input_state.mouse_pos() {
+                        let debug_vertices = self.generate_debug_collision_sphere(mouse_pos);
+                        vertices.extend(debug_vertices);
+                    }
+                }
 
                 // Render
                 if let Some(renderer) = &mut self.renderer {
