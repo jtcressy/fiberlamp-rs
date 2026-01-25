@@ -9,7 +9,7 @@ A modern Rust reimplementation of the classic xscreensaver `fiberlamp` using wgp
 ## Features
 
 - **GPU-accelerated rendering** via wgpu (Vulkan, Metal, DX12 backends)
-- **Native Wayland support** - works with KDE plasma-wallpaper-application
+- **Native Wayland support** - works with KDE [plasma-wallpaper-application](https://invent.kde.org/dos/plasma-wallpaper-application)
 - **Realistic physics simulation** - cantilever beam model with periodic perturbations
 - **Smooth 60fps** on integrated GPUs
 - **MSAA anti-aliasing** - optional 2x, 4x, or 8x multisampling
@@ -87,11 +87,14 @@ WAYLAND_DISPLAY=wayland-0 ./fiberlamp-rs
 
 ### KDE Plasma Wallpaper
 
-To use as an animated wallpaper with KDE's plasma-wallpaper-application:
+To use as an animated wallpaper with KDE Plasma, install the [Application Wallpaper](https://store.kde.org/p/2318884/) plugin ([source](https://invent.kde.org/dos/plasma-wallpaper-application)):
 
-1. Build the release binary
-2. Configure plasma-wallpaper-application to launch the binary
-3. The application will fill whatever surface it's given
+1. Install the plugin via KDE Discover, KDE Store, or build from source
+2. Build fiberlamp-rs: `cargo build --release`
+3. Right-click desktop → Configure Desktop and Wallpaper
+4. Select "Application Wallpaper" as the wallpaper type
+5. Set the application path to your `target/release/fiberlamp-rs` binary
+6. The application will fill the desktop surface
 
 ## How It Works
 
