@@ -6,6 +6,8 @@ A modern Rust reimplementation of the classic xscreensaver `fiberlamp` using wgp
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
+![screenshot](screenshot.png)
+
 ## Features
 
 - **GPU-accelerated rendering** via wgpu (Vulkan, Metal, DX12 backends)
