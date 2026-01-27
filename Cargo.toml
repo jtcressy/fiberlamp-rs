@@ -5,6 +5,15 @@ edition = "2024"
 description = "Modern Rust reimplementation of xscreensaver fiberlamp with wgpu"
 license = "MIT"
 
+[lib]
+name = "fiberlamp"
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"
+
+[features]
+default = []
+macos-screensaver = ["raw-window-handle"]
+
 [dependencies]
 wgpu = "24"
 winit = "0.30"
@@ -15,3 +24,4 @@ rand = "0.8"
 clap = { version = "4", features = ["derive"] }
 env_logger = "0.11"
 log = "0.4"
+raw-window-handle = { version = "0.6", optional = true }

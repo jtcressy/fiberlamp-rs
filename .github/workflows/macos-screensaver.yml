@@ -1,0 +1,58 @@
+name: macOS Screensaver Build
+
+on:
+  push:
+    paths:
+      - 'macos-screensaver/**'
+      - 'src/lib.rs'
+      - 'src/ffi.rs'
+      - 'src/renderer.rs'
+      - 'Cargo.toml'
+  pull_request:
+    paths:
+      - 'macos-screensaver/**'
+      - 'src/lib.rs'
+      - 'src/ffi.rs'
+      - 'src/renderer.rs'
+      - 'Cargo.toml'
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run cargo test
+        run: cargo test
+
+      - name: Build .saver bundle
+        run: ./macos-screensaver/build.sh
+
+      - name: Validate bundle structure
+        run: |
+          test -f target/macos-screensaver/Fiberlamp.saver/Contents/MacOS/Fiberlamp
+          test -f target/macos-screensaver/Fiberlamp.saver/Contents/Info.plist
+
+      - name: Verify codesign
+        run: codesign --verify target/macos-screensaver/Fiberlamp.saver
+
+      - name: Check universal binary architectures
+        run: lipo -info target/macos-screensaver/Fiberlamp.saver/Contents/MacOS/Fiberlamp
+
+      - name: Package .saver bundle
+        run: cd target/macos-screensaver && zip -r ../../Fiberlamp.saver.zip Fiberlamp.saver
+
+      - name: Upload .saver artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fiberlamp.saver.zip
+          path: Fiberlamp.saver.zip
