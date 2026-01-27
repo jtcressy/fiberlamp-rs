@@ -2,6 +2,9 @@ use std::sync::Arc;
 use wgpu::util::DeviceExt;
 use winit::window::Window;
 
+#[cfg(feature = "macos-screensaver")]
+use std::ptr::NonNull;
+
 use crate::vertex::FiberVertex;
 
 /// Maximum number of vertices we can render (500 fibers * 19 segments * 6 vertices)
@@ -190,6 +193,210 @@ impl Renderer {
             queue,
             config,
             size: (size.width, size.height),
+            render_pipeline,
+            vertex_buffer,
+            num_vertices: 0,
+            msaa_sample_count,
+            msaa_texture,
+            msaa_view,
+        }
+    }
+
+    /// Create a renderer from a raw NSView pointer (macOS screensaver support)
+    ///
+    /// # Safety
+    /// The caller must ensure:
+    /// - `ns_view` is a valid pointer to an NSView with `wantsLayer = YES`
+    /// - The NSView remains valid for the lifetime of this Renderer
+    /// - This is called from the main thread (Metal requirement)
+    #[cfg(feature = "macos-screensaver")]
+    pub async fn from_raw_view(
+        ns_view: *mut std::ffi::c_void,
+        width: u32,
+        height: u32,
+        msaa_sample_count: u32,
+    ) -> Self {
+        use raw_window_handle::{AppKitWindowHandle, RawWindowHandle};
+
+        // Validate and normalize MSAA sample count to power of 2
+        let msaa_sample_count = match msaa_sample_count {
+            0 | 1 => 1,
+            2 => 2,
+            3 | 4 => 4,
+            _ => 8,
+        };
+
+        // Create wgpu instance with Metal backend for macOS
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::METAL,
+            flags: wgpu::InstanceFlags::empty(),
+            ..Default::default()
+        });
+
+        // Create surface from raw NSView using unsafe API
+        let surface = unsafe {
+            let handle = AppKitWindowHandle::new(
+                NonNull::new(ns_view).expect("NSView pointer must not be null"),
+            );
+            let raw_handle = RawWindowHandle::AppKit(handle);
+
+            // Create a surface target from the raw handle
+            let target = wgpu::SurfaceTargetUnsafe::RawHandle {
+                raw_display_handle: raw_window_handle::RawDisplayHandle::AppKit(
+                    raw_window_handle::AppKitDisplayHandle::new(),
+                ),
+                raw_window_handle: raw_handle,
+            };
+
+            instance
+                .create_surface_unsafe(target)
+                .expect("Failed to create surface from NSView")
+        };
+
+        // Request adapter
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                compatible_surface: Some(&surface),
+                force_fallback_adapter: false,
+            })
+            .await
+            .expect("Failed to find suitable GPU adapter");
+
+        log::info!("Using adapter: {:?}", adapter.get_info());
+
+        // Request device and queue
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Fiberlamp Device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                        .using_resolution(adapter.limits()),
+                    memory_hints: wgpu::MemoryHints::Performance,
+                },
+                None,
+            )
+            .await
+            .expect("Failed to create device");
+
+        // Configure surface
+        let surface_caps = surface.get_capabilities(&adapter);
+        let surface_format = surface_caps
+            .formats
+            .iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_caps.formats[0]);
+
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: width.max(1),
+            height: height.max(1),
+            present_mode: wgpu::PresentMode::AutoVsync,
+            alpha_mode: surface_caps.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &config);
+
+        log::info!(
+            "Surface configured: {}x{} {:?}",
+            config.width,
+            config.height,
+            surface_format
+        );
+
+        // Load shader
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("Fiber Shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/fiber.wgsl").into()),
+        });
+
+        // Create render pipeline with additive blending
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Fiber Pipeline Layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+
+        let blend_state = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::One,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Fiber Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[FiberVertex::desc()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(blend_state),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: msaa_sample_count,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        });
+
+        // Create vertex buffer with capacity for all fibers
+        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Fiber Vertex Buffer"),
+            contents: bytemuck::cast_slice(&vec![FiberVertex::new(glam::Vec2::ZERO, [0.0; 4]); MAX_VERTICES]),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        });
+
+        // Create MSAA texture if sample count > 1
+        let (msaa_texture, msaa_view) = if msaa_sample_count > 1 {
+            let texture = Self::create_msaa_texture(&device, &config, msaa_sample_count);
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            log::info!("MSAA enabled with {}x samples", msaa_sample_count);
+            (Some(texture), Some(view))
+        } else {
+            log::info!("MSAA disabled");
+            (None, None)
+        };
+
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            size: (width, height),
             render_pipeline,
             vertex_buffer,
             num_vertices: 0,
