@@ -53,8 +53,10 @@ jobs:
         run: |
           cp -R target/macos-screensaver/Fiberlamp.saver ~/Library/Screen\ Savers/
           /System/Library/CoreServices/ScreenSaverEngine.app/Contents/MacOS/ScreenSaverEngine -background &
-          sleep 5
           screencapture -x screenshot.png
+          screencapture -v -V 8 recording.mov &
+          RECORD_PID=$!
+          wait $RECORD_PID 2>/dev/null || true
           kill %1 2>/dev/null || true
 
       - name: Upload .saver artifact
@@ -69,4 +71,12 @@ jobs:
         with:
           name: screenshot
           path: screenshot.png
+          if-no-files-found: ignore
+
+      - name: Upload recording
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recording
+          path: recording.mov
           if-no-files-found: ignore
