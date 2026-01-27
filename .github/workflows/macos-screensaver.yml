@@ -52,11 +52,11 @@ jobs:
         continue-on-error: true
         run: |
           cp -R target/macos-screensaver/Fiberlamp.saver ~/Library/Screen\ Savers/
-          /System/Library/CoreServices/ScreenSaverEngine.app/Contents/MacOS/ScreenSaverEngine -background &
-          screencapture -x screenshot.png
-          screencapture -v -V 8 recording.mov &
+          screencapture -v -V 10 recording.mov &
           RECORD_PID=$!
+          /System/Library/CoreServices/ScreenSaverEngine.app/Contents/MacOS/ScreenSaverEngine -background &
           wait $RECORD_PID 2>/dev/null || true
+          screencapture -x screenshot.png
           kill %1 2>/dev/null || true
 
       - name: Upload .saver artifact
