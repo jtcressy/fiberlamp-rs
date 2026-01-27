@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
 
-use crate::physics::FiberLamp;
+use crate::physics::{ExternalForces, FiberLamp};
 use crate::renderer::Renderer;
 use crate::vertex::{body_color, generate_palette, tip_color, triangulate_segment, FiberVertex};
 use crate::NODES;
@@ -121,7 +121,8 @@ pub extern "C" fn fiberlamp_animate(handle: *mut FiberlampHandle) -> i32 {
 
     let result = panic::catch_unwind(AssertUnwindSafe(|| {
         // Step physics
-        handle.fiber_lamp.step(&mut handle.rng);
+        let forces = ExternalForces::new();
+        handle.fiber_lamp.step(&mut handle.rng, &forces);
 
         // Generate vertices
         let vertices = generate_fiber_vertices(
