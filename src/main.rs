@@ -407,7 +407,7 @@ impl ApplicationHandler for App {
 
                     match renderer.render() {
                         Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => {
+                        Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
                             if let Some(window) = &self.window {
                                 let size = window.inner_size();
                                 renderer.resize(size.width, size.height);
