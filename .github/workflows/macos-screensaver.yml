@@ -48,8 +48,11 @@ jobs:
       - name: Check universal binary architectures
         run: lipo -info target/macos-screensaver/Fiberlamp.saver/Contents/MacOS/Fiberlamp
 
+      - name: Package .saver bundle
+        run: cd target/macos-screensaver && zip -r ../../Fiberlamp.saver.zip Fiberlamp.saver
+
       - name: Upload .saver artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Fiberlamp.saver
-          path: target/macos-screensaver/Fiberlamp.saver
+          name: Fiberlamp.saver.zip
+          path: Fiberlamp.saver.zip
