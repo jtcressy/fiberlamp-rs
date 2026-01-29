@@ -1,0 +1,21 @@
+[package]
+name = "fiberlamp-bin"
+description = "Standalone windowed/fullscreen fiberlamp application"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fiberlamp"
+path = "src/main.rs"
+
+[dependencies]
+fiberlamp-core = { path = "../fiberlamp-core" }
+wgpu = { workspace = true }
+glam = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+pollster = { workspace = true }
+env_logger = { workspace = true }
+winit = "0.30"
+clap = { version = "4", features = ["derive"] }

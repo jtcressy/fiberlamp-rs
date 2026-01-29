@@ -1,0 +1,13 @@
+[package]
+name = "fiberlamp-core"
+description = "Core simulation, rendering, and render loop for the fiberlamp screensaver"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+glam = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }

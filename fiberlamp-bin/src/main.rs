@@ -12,30 +12,22 @@ use winit::{
 };
 
 mod input;
-mod physics;
-mod renderer;
-mod vertex;
 
+use fiberlamp_core::{
+    ExternalForces, FiberLamp, FiberVertex, Renderer, RendererResources, NODES,
+    body_color, generate_palette, setup_wgpu_device_and_config, tip_color, triangulate_segment,
+};
 use input::InputState;
-use physics::{ExternalForces, FiberLamp, NODES};
-use renderer::Renderer;
-use vertex::{body_color, generate_palette, tip_color, triangulate_segment, FiberVertex};
 
 // ============================================================================
 // INTERACTIVITY TUNING CONSTANTS
-// Adjust these to change how fibers respond to window movement and mouse
 // ============================================================================
 
 /// Mouse collision sphere radius in clip space [-1, 1]
-/// Larger = easier to hit fibers, smaller = more precise
-/// Set to 0.0 to disable mouse collision entirely
 const COLLISION_RADIUS: f32 = 0.25;
 
 /// Collision impulse strength multiplier
-/// Higher = fibers react more strongly to mouse collision
-/// Note: This scales mouse velocity, so needs to be larger
 const COLLISION_STRENGTH: f32 = 200.0;
-
 
 /// Number of segments for the debug collision circle
 const DEBUG_CIRCLE_SEGMENTS: usize = 32;
@@ -121,8 +113,8 @@ impl App {
         let (width, height) = renderer.size();
         let aspect = width as f32 / height as f32;
 
-        // Scale factor to fit fibers on screen
-        let scale = 1.5; // Scale up to fill screen nicely
+        // Scale factor to fit fibers on screen nicely
+        let scale = 1.5;
 
         // Precompute rotation for the entire lamp
         let cos_t = lamp.theta.cos();
@@ -141,9 +133,6 @@ impl App {
                 let node_rx = node.x * cos_t - node.z * sin_t;
 
                 // Convert 3D position to 2D screen space
-                // Base at bottom, fibers spray upward (like original xscreensaver)
-                // Physics: y=0 at base, y<0 toward tips (upward)
-                // Screen: y=-1 bottom, y=+1 top
                 let p0 = Vec2::new(
                     parent_rx * scale / aspect,
                     -parent.y * scale - 0.7,
@@ -180,7 +169,6 @@ impl App {
     }
 
     /// Calculate collision impulses for all fibers based on mouse position and velocity
-    /// Updates self.collision_impulses in place
     fn calculate_collision_impulses(&mut self, mouse_pos: (f32, f32), mouse_velocity: (f32, f32)) {
         let Some(lamp) = &self.fiber_lamp else {
             return;
@@ -219,17 +207,9 @@ impl App {
             let dist_sq = dx * dx + dy * dy;
             let radius_sq = COLLISION_RADIUS * COLLISION_RADIUS;
 
-            // Only apply impulse if:
-            // 1. Tip is within collision radius
-            // 2. Mouse is actually moving (velocity-based)
-            // 3. Fiber is front-facing
             let impulse = if dist_sq < radius_sq && mouse_speed > 0.001 && tip_rz > -0.1 {
-                // Impulse direction: PUSH fiber in direction of mouse movement
-                // Scale by how close to center (stronger near center)
                 let dist = dist_sq.sqrt();
                 let penetration = 1.0 - (dist / COLLISION_RADIUS);
-
-                // Negate to push (not pull) fibers in mouse direction
                 -mouse_velocity.0 * penetration * COLLISION_STRENGTH
             } else {
                 0.0
@@ -247,9 +227,8 @@ impl App {
 
         let mut vertices = Vec::with_capacity(DEBUG_CIRCLE_SEGMENTS * 6);
 
-        // Draw circle as line segments (rendered as thin quads)
-        let line_width = 0.005; // Thin line
-        let color = [1.0, 0.0, 0.0, 0.8]; // Red with some transparency
+        let line_width = 0.005;
+        let color = [1.0, 0.0, 0.0, 0.8];
 
         for i in 0..DEBUG_CIRCLE_SEGMENTS {
             let angle0 = (i as f32 / DEBUG_CIRCLE_SEGMENTS as f32) * 2.0 * PI;
@@ -290,8 +269,29 @@ impl ApplicationHandler for App {
                 .expect("Failed to create window"),
         );
 
-        // Initialize wgpu renderer
-        let renderer = pollster::block_on(Renderer::new(window.clone(), self.args.msaa));
+        // Create wgpu instance and surface from winit window
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            flags: wgpu::InstanceFlags::empty(),
+            ..Default::default()
+        });
+
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("Failed to create surface");
+
+        let size = window.inner_size();
+        let (device, queue, config) = pollster::block_on(
+            setup_wgpu_device_and_config(&instance, &surface, size.width, size.height),
+        );
+
+        let resources = RendererResources {
+            surface,
+            device,
+            queue,
+            config,
+        };
+        let renderer = Renderer::new(resources, self.args.msaa);
 
         // Initialize fiber lamp simulation
         let fiber_lamp = FiberLamp::new(self.args.count as usize, &mut self.rng);
@@ -338,13 +338,12 @@ impl ApplicationHandler for App {
                 }
             }
 
-
             WindowEvent::CursorMoved { position, .. } => {
                 // Convert pixel coordinates to clip space [-1, 1]
                 if let Some(window) = &self.window {
                     let size = window.inner_size();
                     let clip_x = (position.x as f32 / size.width as f32) * 2.0 - 1.0;
-                    let clip_y = -((position.y as f32 / size.height as f32) * 2.0 - 1.0); // Flip Y
+                    let clip_y = -((position.y as f32 / size.height as f32) * 2.0 - 1.0);
                     self.input_state.update_mouse_pos(clip_x, clip_y);
                 }
             }

@@ -5,7 +5,8 @@ set -euo pipefail
 # Creates a .saver bundle (universal if cross-compilation targets available)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+CRATE_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$CRATE_ROOT")"
 BUILD_DIR="$PROJECT_ROOT/target/macos-screensaver"
 BUNDLE_DIR="$BUILD_DIR/Fiberlamp.saver"
 
@@ -37,11 +38,11 @@ if [ "$CAN_CROSS_COMPILE" = true ]; then
     # Build for both architectures
     echo ""
     echo "=== Building Rust staticlib (x86_64) ==="
-    cargo build --release --lib --features macos-screensaver --target x86_64-apple-darwin
+    cargo build --release -p fiberlamp-macos --features macos-screensaver --target x86_64-apple-darwin
 
     echo ""
     echo "=== Building Rust staticlib (arm64) ==="
-    cargo build --release --lib --features macos-screensaver --target aarch64-apple-darwin
+    cargo build --release -p fiberlamp-macos --features macos-screensaver --target aarch64-apple-darwin
 
     # Create universal binary with lipo
     echo ""
@@ -59,7 +60,7 @@ else
     # Build for native architecture
     echo ""
     echo "=== Building Rust staticlib (native) ==="
-    cargo build --release --lib --features macos-screensaver
+    cargo build --release -p fiberlamp-macos --features macos-screensaver
 
     RUST_LIB_UNIVERSAL="$PROJECT_ROOT/target/release/libfiberlamp.a"
 

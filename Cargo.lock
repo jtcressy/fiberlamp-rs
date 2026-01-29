@@ -501,19 +501,50 @@ dependencies = [
 ]
 
 [[package]]
-name = "fiberlamp-rs"
+name = "fiberlamp-bin"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "env_logger",
+ "fiberlamp-core",
+ "glam",
+ "log",
+ "pollster",
+ "rand",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "fiberlamp-core"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "clap",
+ "glam",
+ "log",
+ "rand",
+ "wgpu",
+]
+
+[[package]]
+name = "fiberlamp-kde"
+version = "0.1.0"
+dependencies = [
+ "fiberlamp-core",
+]
+
+[[package]]
+name = "fiberlamp-macos"
+version = "0.1.0"
+dependencies = [
  "env_logger",
+ "fiberlamp-core",
  "glam",
  "log",
  "pollster",
  "rand",
  "raw-window-handle",
  "wgpu",
- "winit",
 ]
 
 [[package]]

@@ -3,17 +3,13 @@ name: macOS Screensaver Build
 on:
   push:
     paths:
-      - 'macos-screensaver/**'
-      - 'src/lib.rs'
-      - 'src/ffi.rs'
-      - 'src/renderer.rs'
+      - 'fiberlamp-macos/**'
+      - 'fiberlamp-core/**'
       - 'Cargo.toml'
   pull_request:
     paths:
-      - 'macos-screensaver/**'
-      - 'src/lib.rs'
-      - 'src/ffi.rs'
-      - 'src/renderer.rs'
+      - 'fiberlamp-macos/**'
+      - 'fiberlamp-core/**'
       - 'Cargo.toml'
 
 jobs:
@@ -35,7 +31,7 @@ jobs:
         run: cargo test
 
       - name: Build .saver bundle
-        run: ./macos-screensaver/build.sh
+        run: ./fiberlamp-macos/macos-screensaver/build.sh
 
       - name: Validate bundle structure
         run: |

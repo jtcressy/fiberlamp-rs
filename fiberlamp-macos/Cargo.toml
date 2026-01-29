@@ -1,0 +1,24 @@
+[package]
+name = "fiberlamp-macos"
+description = "macOS screensaver FFI wrapper for fiberlamp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fiberlamp"
+crate-type = ["staticlib"]
+
+[features]
+default = []
+macos-screensaver = ["raw-window-handle"]
+
+[dependencies]
+fiberlamp-core = { path = "../fiberlamp-core" }
+wgpu = { workspace = true }
+glam = { workspace = true }
+rand = { workspace = true }
+log = { workspace = true }
+pollster = { workspace = true }
+env_logger = { workspace = true }
+raw-window-handle = { version = "0.6", optional = true }

@@ -1,0 +1,9 @@
+[package]
+name = "fiberlamp-kde"
+description = "KDE Plasma wallpaper plugin for fiberlamp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fiberlamp-core = { path = "../fiberlamp-core" }
